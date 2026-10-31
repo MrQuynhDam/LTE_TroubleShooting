@@ -83,12 +83,15 @@ def inject_cockpit_css() -> None:
             font-family: 'Inter', system-ui, -apple-system, sans-serif;
         }
         [data-testid="stHeader"] {
-            background: rgba(11, 15, 25, 0.85) !important;
+            background: rgba(11, 15, 25, 0.90) !important;
             backdrop-filter: blur(8px);
+            border-bottom: 1px solid rgba(30, 41, 59, 0.65);
         }
-        .block-container {
-            padding-top: 1.15rem !important;
-            padding-bottom: 2rem !important;
+        [data-testid="stMainBlockContainer"], .block-container {
+            padding-top: 3.95rem !important;
+            padding-bottom: 2.5rem !important;
+            padding-left: 1.5rem !important;
+            padding-right: 1.5rem !important;
             max-width: 100% !important;
         }
 
@@ -299,19 +302,31 @@ def inject_cockpit_css() -> None:
             color: var(--cyan-hex);
         }
 
-        /* Slide-Over Inspector Drawer */
-        @keyframes slideInDrawer {
-            from { opacity: 0; transform: translateX(18px); }
+        /* True Off-Canvas Fixed Slide-Over Inspector Drawer */
+        @keyframes slideOverFromRight {
+            from { opacity: 0; transform: translateX(100%); }
             to   { opacity: 1; transform: translateX(0); }
         }
+        .st-key-slide_over_drawer {
+            position: fixed !important;
+            top: 3.75rem !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: min(540px, 94vw) !important;
+            z-index: 999990 !important;
+            background: linear-gradient(180deg, #111827 0%, #0B0F19 100%) !important;
+            border-left: 2px solid var(--cyan-hex) !important;
+            box-shadow: -24px 0 64px rgba(0, 0, 0, 0.85) !important;
+            padding: 14px 18px 28px 18px !important;
+            overflow-y: auto !important;
+            animation: slideOverFromRight 0.26s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        }
         .inspector-drawer {
-            background: linear-gradient(180deg, #131B2E 0%, #0D1322 100%);
+            background: rgba(21, 29, 46, 0.72);
             border: 1px solid var(--border-hairline);
             border-left: 3px solid var(--cyan-hex);
             border-radius: 10px;
-            padding: 14px 16px;
-            animation: slideInDrawer 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-            box-shadow: -8px 0 28px rgba(0, 0, 0, 0.45);
+            padding: 14px 15px;
         }
         .inspector-drawer.drawer-CRITICAL { border-left-color: var(--crit-hex); }
         .inspector-drawer.drawer-DEGRADED { border-left-color: var(--deg-hex); }
@@ -427,17 +442,25 @@ def inject_cockpit_css() -> None:
             border-radius: 50%;
             margin-right: 4px;
         }
-        pre.amos-pre {
+        .amos-code-box {
             margin: 0;
-            background: #000000 !important;
-            color: #38BDF8 !important;
-            font-family: 'JetBrains Mono', 'Roboto Mono', monospace !important;
-            font-size: 0.74rem;
-            line-height: 1.42;
-            max-height: 250px;
+            background: #000000;
+            color: #38BDF8;
+            font-family: 'JetBrains Mono', 'Roboto Mono', Consolas, monospace;
+            font-size: 0.73rem;
+            line-height: 1.45;
+            max-height: 240px;
             overflow-y: auto;
-            white-space: pre-wrap;
+            padding: 2px 0;
         }
+        .amos-line {
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-family: 'JetBrains Mono', 'Roboto Mono', Consolas, monospace;
+        }
+        .amos-cmt { color: #6EE7B7; }
+        .amos-set { color: #FBBF24; font-weight: 600; }
+        .amos-hdr { color: #F8FAFC; font-weight: 700; }
 
         /* Crisp Action Buttons */
         .stButton > button, .stDownloadButton > button {
@@ -469,6 +492,33 @@ def inject_cockpit_css() -> None:
 # ============================================================================
 # 2. CACHED DATA INGESTION & CLIPBOARD / AUTO-DOWNLOAD WIDGETS
 # ============================================================================
+
+def render_html(markup: str) -> None:
+    """
+    Strip leading line indentation & empty lines before st.markdown so CommonMark
+    never misinterprets indented HTML tags as raw <pre><code> blocks.
+    """
+    compact = "\n".join(line.strip() for line in markup.splitlines() if line.strip())
+    st.markdown(compact, unsafe_allow_html=True)
+
+
+def format_amos_terminal_html(amos_script: str) -> str:
+    """Format AMOS/Moshell script lines into syntax-colored HTML without blank lines."""
+    out_lines: List[str] = []
+    for raw_line in amos_script.splitlines():
+        s = raw_line.strip()
+        if not s:
+            out_lines.append('<div class="amos-line">&nbsp;</div>')
+        elif s.startswith("#"):
+            out_lines.append(f'<div class="amos-line amos-cmt">{html.escape(raw_line)}</div>')
+        elif s.startswith("set "):
+            out_lines.append(f'<div class="amos-line amos-set">{html.escape(raw_line)}</div>')
+        elif s.startswith(("moshell ", "confb", "gs+", "gs-", "lt ", "cvms ")):
+            out_lines.append(f'<div class="amos-line amos-hdr">{html.escape(raw_line)}</div>')
+        else:
+            out_lines.append(f'<div class="amos-line">{html.escape(raw_line)}</div>')
+    return "".join(out_lines)
+
 
 @st.cache_data(show_spinner=False)
 def load_cached_dump(file_bytes: bytes, file_name: str) -> AnalysisResult:
@@ -847,7 +897,9 @@ def init_session_state() -> None:
         "sel_rca_cats": [],
         "cross_filter_cell": None,
         "inspected_cell": None,
-        "drawer_open": True,
+        "drawer_open": False,
+        "last_grid_sel": None,
+        "last_pareto_sel": None,
         "pareto_metric": "DCR (%)",
         "pdf_cache_bytes": None,
         "pdf_cache_name": "",
@@ -918,7 +970,7 @@ def main() -> None:
     # COLLAPSIBLE SIDEBAR: DATA INGESTION & MULTI-TIER FILTERING
     # ------------------------------------------------------------------
     with st.sidebar:
-        st.markdown(
+        render_html(
             """
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
               <div style="width:34px;height:34px;border-radius:8px;background:#151D2E;border:1px solid #38BDF8;display:flex;align-items:center;justify-content:center;font-weight:700;color:#38BDF8;font-family:'JetBrains Mono',monospace;">E///</div>
@@ -927,8 +979,7 @@ def main() -> None:
                 <div style="font-size:0.70rem;color:#94A3B8;font-family:'JetBrains Mono',monospace;">ENM / AMOS Telemetry v4.0</div>
               </div>
             </div>
-            """,
-            unsafe_allow_html=True,
+            """
         )
 
         st.markdown("##### 📥 PM Counter Ingestion")
@@ -1027,13 +1078,21 @@ def main() -> None:
         default_pool = grid_df if not grid_df.empty else full_df
         st.session_state["inspected_cell"] = str(default_pool.iloc[0]["EUtranCellFDD"])
 
+    # Support URL query param ?inspect=1 or ?inspect=<EUtranCellFDD>
+    qp_inspect = st.query_params.get("inspect")
+    if qp_inspect and not st.session_state.get("_qp_applied"):
+        st.session_state["_qp_applied"] = True
+        if qp_inspect in full_df["EUtranCellFDD"].values:
+            st.session_state["inspected_cell"] = str(qp_inspect)
+        st.session_state["drawer_open"] = True
+
     # ------------------------------------------------------------------
     # TOP TELEMETRY HEADER
     # ------------------------------------------------------------------
     hdr_left, hdr_right = st.columns([9.2, 2.8], gap="small")
     with hdr_left:
         sheets_str = " + ".join(result.sheets_loaded)
-        st.markdown(
+        render_html(
             f"""
             <div class="telemetry-bar">
               <div class="telemetry-brand">
@@ -1056,8 +1115,7 @@ def main() -> None:
                 <span>DATA FRESHNESS: VERIFIED &bull; {result.total_rop_rows:,} ROPs</span>
               </div>
             </div>
-            """,
-            unsafe_allow_html=True,
+            """
         )
 
     with hdr_right:
@@ -1112,7 +1170,7 @@ def main() -> None:
     c1, c2, c3, c4 = st.columns(4, gap="small")
 
     with c1:
-        st.markdown(
+        render_html(
             f"""
             <div class="kpi-card">
               <div class="kpi-label">Total Evaluated Cells</div>
@@ -1125,8 +1183,7 @@ def main() -> None:
                 <span class="mono-num">Low-Vol Excl: {low_sample_cnt}</span>
               </div>
             </div>
-            """,
-            unsafe_allow_html=True,
+            """
         )
 
     with c2:
@@ -1136,7 +1193,7 @@ def main() -> None:
             if worst_cnt > 0
             else '<span class="status-badge badge-normal">0.0% CLEAR</span>'
         )
-        st.markdown(
+        render_html(
             f"""
             <div class="kpi-card {w_cls}">
               <div class="kpi-label">Worst Cells Detected</div>
@@ -1149,14 +1206,13 @@ def main() -> None:
                 <span class="mono-num" style="color:#FAAD14;">▲ DEG: {deg_cnt}</span>
               </div>
             </div>
-            """,
-            unsafe_allow_html=True,
+            """
         )
 
     with c3:
         cssr_card_cls = "card-norm" if avg_cssr >= 98.5 else ("card-deg" if avg_cssr >= 97.0 else "card-crit")
         delta_badge_cls = "badge-normal" if cssr_delta >= 0 else ("badge-degraded" if avg_cssr >= 97.0 else "badge-critical")
-        st.markdown(
+        render_html(
             f"""
             <div class="kpi-card {cssr_card_cls}">
               <div class="kpi-label">System Accessibility (Avg CSSR)</div>
@@ -1169,8 +1225,7 @@ def main() -> None:
                 <span class="mono-num">HOSR: {full_df['HOSR'].mean():.2f}%</span>
               </div>
             </div>
-            """,
-            unsafe_allow_html=True,
+            """
         )
 
     with c4:
@@ -1181,7 +1236,7 @@ def main() -> None:
             if dcr_breach
             else '<span class="status-badge badge-normal">✓ &le; 1.0% OK</span>'
         )
-        st.markdown(
+        render_html(
             f"""
             <div class="kpi-card {dcr_card_cls}">
               <div class="kpi-label">System Retainability (Avg DCR)</div>
@@ -1194,8 +1249,7 @@ def main() -> None:
                 <span class="mono-num">{avg_dcr_norm:.1f} / 10k hr</span>
               </div>
             </div>
-            """,
-            unsafe_allow_html=True,
+            """
         )
 
     st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
@@ -1206,14 +1260,13 @@ def main() -> None:
     col_analytics, col_pareto = st.columns([7, 5], gap="small")
 
     with col_analytics:
-        st.markdown(
+        render_html(
             """
             <div class="panel-header">
               <span class="panel-title">📈 Radio Quality &amp; ROP Telemetry Diagnostics</span>
               <span class="panel-hint">3GPP Multi-Dimensional View</span>
             </div>
-            """,
-            unsafe_allow_html=True,
+            """
         )
         tab_names = ["🕒 ROP Trendline (CSSR vs DCR)", "📊 CQI Distribution Stacked Bar"]
         if result.has_prb_spectrum:
@@ -1262,14 +1315,13 @@ def main() -> None:
                     st.info("Select a cell with PRB interference measurements to inspect PRB 1–100 noise floor.")
 
     with col_pareto:
-        st.markdown(
+        render_html(
             """
             <div class="panel-header">
               <span class="panel-title">🔥 Top 10 Worst Cells Pareto</span>
-              <span class="panel-hint">Click bar to Cross-Filter &amp; Diagnose</span>
+              <span class="panel-hint">Click bar to Cross-Filter &amp; Slide-Over</span>
             </div>
-            """,
-            unsafe_allow_html=True,
+            """
         )
         p_col1, p_col2 = st.columns([7.5, 4.5], gap="small")
         with p_col1:
@@ -1310,24 +1362,26 @@ def main() -> None:
             config={"displayModeBar": False},
         )
 
-        # Handle Pareto Bar Click -> Cross-Filter Master Grid & Open Inspector Drawer
+        # Handle Pareto Bar Click -> Cross-Filter Master Grid & Open Slide-Over Drawer
         sel_points = (
             pareto_event.get("selection", {}).get("points", [])
             if isinstance(pareto_event, dict)
             else getattr(getattr(pareto_event, "selection", None), "points", [])
         )
-        if sel_points:
-            clicked_y = sel_points[0].get("y")
-            if clicked_y and clicked_y != st.session_state.get("cross_filter_cell"):
-                st.session_state["cross_filter_cell"] = str(clicked_y)
-                st.session_state["inspected_cell"] = str(clicked_y)
+        pareto_sig = (gen_key, rank_by, sel_points[0].get("y") if sel_points else None)
+        if pareto_sig != st.session_state.get("last_pareto_sel"):
+            st.session_state["last_pareto_sel"] = pareto_sig
+            if sel_points and sel_points[0].get("y"):
+                clicked_y = str(sel_points[0].get("y"))
+                st.session_state["cross_filter_cell"] = clicked_y
+                st.session_state["inspected_cell"] = clicked_y
                 st.session_state["drawer_open"] = True
                 st.rerun()
 
-    st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
+    render_html("<div style='height:6px;'></div>")
 
     # ------------------------------------------------------------------
-    # TIER 3: DATA-DENSE MASTER GRID & SLIDE-OVER ACTION INSPECTOR
+    # TIER 3: DATA-DENSE MASTER GRID & OFF-CANVAS SLIDE-OVER INSPECTOR
     # ------------------------------------------------------------------
     tb1, tb2, tb3, tb4 = st.columns([4.6, 3.2, 2.4, 1.8], gap="small")
     with tb1:
@@ -1336,14 +1390,13 @@ def main() -> None:
             if cross_cell
             else f"{st.session_state['triage_preset']} ({len(grid_df)} cells)"
         )
-        st.markdown(
+        render_html(
             f"""
             <div class="panel-header" style="margin-bottom:4px;">
               <span class="panel-title">🗂 Worst Cells Master Telemetry Grid</span>
               <span class="panel-hint">{html.escape(filter_tag)}</span>
             </div>
-            """,
-            unsafe_allow_html=True,
+            """
         )
 
     with tb2:
@@ -1391,101 +1444,110 @@ def main() -> None:
         )
 
     with tb4:
-        drawer_lbl = "⇥ Hide Inspector" if st.session_state["drawer_open"] else "⇤ Open Inspector"
+        drawer_lbl = "⇥ Close Slide-Over" if st.session_state["drawer_open"] else "⇤ Slide-Over Inspector"
         if st.button(drawer_lbl, width="stretch"):
             st.session_state["drawer_open"] = not st.session_state["drawer_open"]
             st.rerun()
 
-    # Split Master Grid and Slide-Over Inspector Drawer
-    if st.session_state["drawer_open"]:
-        col_grid, col_drawer = st.columns([7, 5], gap="small")
+    # Full-Width Master Interactive Grid
+    if grid_df.empty:
+        st.info(
+            "No cells match the active filter criteria (e.g., 0 cells breached this specific threshold in the current dataset). "
+            "Switch Quick Triage Preset or click 'Reset All Filters' in the sidebar."
+        )
     else:
-        col_grid = st.container()
-        col_drawer = None
-
-    with col_grid:
-        if grid_df.empty:
-            st.info(
-                "No cells match the active filter criteria (e.g., 0 cells breached this specific threshold in the current dataset). "
-                "Switch Quick Triage Preset or click 'Reset All Filters' in the sidebar."
-            )
-        else:
-            status_icons = {
-                "CRITICAL": "🔴 CRITICAL",
-                "DEGRADED": "🟠 DEGRADED",
-                "NORMAL": "🟢 NORMAL",
-                "LOW_SAMPLE": "⚪ LOW_SAMPLE",
+        status_icons = {
+            "CRITICAL": "🔴 CRITICAL",
+            "DEGRADED": "🟠 DEGRADED",
+            "NORMAL": "🟢 NORMAL",
+            "LOW_SAMPLE": "⚪ LOW_SAMPLE",
+        }
+        display_df = pd.DataFrame(
+            {
+                "Action": ["[Diagnose] ▸"] * len(grid_df),
+                "Status": grid_df["Status"].map(status_icons).fillna(grid_df["Status"]),
+                "eNodeB_Name": grid_df["eNodeB_Name"],
+                "EUtranCellFDD": grid_df["EUtranCellFDD"],
+                "CSSR (%)": grid_df["CSSR"].round(2),
+                "DCR (%)": grid_df["DCR"].round(2),
+                "HOSR (%)": grid_df["HOSR"].round(2),
+                "Avg CQI": grid_df["Avg_CQI"].round(2),
+                "UL Intf (dBm)": grid_df["UL_Intf_dBm"].round(1),
+                "IRAT PP (%)": grid_df["IRAT_PingPong_Rate"].round(2),
+                "RCA Type": grid_df["RCA_Category"],
+                "Root Cause Diagnosis": grid_df["Primary_Root_Cause"],
+                "Confidence": grid_df["Confidence_Score"],
             }
-            display_df = pd.DataFrame(
-                {
-                    "Action": ["[Diagnose] ▸"] * len(grid_df),
-                    "Status": grid_df["Status"].map(status_icons).fillna(grid_df["Status"]),
-                    "eNodeB_Name": grid_df["eNodeB_Name"],
-                    "EUtranCellFDD": grid_df["EUtranCellFDD"],
-                    "CSSR (%)": grid_df["CSSR"].round(2),
-                    "DCR (%)": grid_df["DCR"].round(2),
-                    "HOSR (%)": grid_df["HOSR"].round(2),
-                    "Avg CQI": grid_df["Avg_CQI"].round(2),
-                    "UL Intf (dBm)": grid_df["UL_Intf_dBm"].round(1),
-                    "IRAT PP (%)": grid_df["IRAT_PingPong_Rate"].round(2),
-                    "RCA Type": grid_df["RCA_Category"],
-                    "Root Cause Diagnosis": grid_df["Primary_Root_Cause"],
-                    "Confidence": grid_df["Confidence_Score"],
-                }
-            )
+        )
 
-            grid_event = st.dataframe(
-                display_df,
-                width="stretch",
-                height=470,
-                hide_index=True,
-                on_select="rerun",
-                selection_mode="single-row",
-                key=f"master_grid_{gen_key}_{cross_cell}_{st.session_state['triage_preset']}",
-                column_config={
-                    "Action": st.column_config.TextColumn("Inspect", width="small"),
-                    "Status": st.column_config.TextColumn("Severity", width="small"),
-                    "eNodeB_Name": st.column_config.TextColumn("eNodeB_Name", width="medium"),
-                    "EUtranCellFDD": st.column_config.TextColumn("EUtranCellFDD", width="medium"),
-                    "CSSR (%)": st.column_config.NumberColumn("CSSR %", format="%.2f%%"),
-                    "DCR (%)": st.column_config.NumberColumn("DCR %", format="%.2f%%"),
-                    "HOSR (%)": st.column_config.NumberColumn("HOSR %", format="%.2f%%"),
-                    "Avg CQI": st.column_config.NumberColumn("Avg CQI", format="%.2f"),
-                    "UL Intf (dBm)": st.column_config.NumberColumn("UL Noise", format="%.1f dBm"),
-                    "IRAT PP (%)": st.column_config.NumberColumn("IRAT PP", format="%.2f%%"),
-                    "RCA Type": st.column_config.TextColumn("RCA Category", width="medium"),
-                    "Root Cause Diagnosis": st.column_config.TextColumn("Primary Root Cause", width="large"),
-                    "Confidence": st.column_config.ProgressColumn(
-                        "Confidence",
-                        format="%d%%",
-                        min_value=0,
-                        max_value=100,
-                    ),
-                },
-            )
+        grid_event = st.dataframe(
+            display_df,
+            width="stretch",
+            height=470,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key=f"master_grid_{gen_key}_{cross_cell}_{st.session_state['triage_preset']}",
+            column_config={
+                "Action": st.column_config.TextColumn("Inspect", width="small"),
+                "Status": st.column_config.TextColumn("Severity", width="small"),
+                "eNodeB_Name": st.column_config.TextColumn("eNodeB_Name", width="medium"),
+                "EUtranCellFDD": st.column_config.TextColumn("EUtranCellFDD", width="medium"),
+                "CSSR (%)": st.column_config.NumberColumn("CSSR %", format="%.2f%%"),
+                "DCR (%)": st.column_config.NumberColumn("DCR %", format="%.2f%%"),
+                "HOSR (%)": st.column_config.NumberColumn("HOSR %", format="%.2f%%"),
+                "Avg CQI": st.column_config.NumberColumn("Avg CQI", format="%.2f"),
+                "UL Intf (dBm)": st.column_config.NumberColumn("UL Noise", format="%.1f dBm"),
+                "IRAT PP (%)": st.column_config.NumberColumn("IRAT PP", format="%.2f%%"),
+                "RCA Type": st.column_config.TextColumn("RCA Category", width="medium"),
+                "Root Cause Diagnosis": st.column_config.TextColumn("Primary Root Cause", width="large"),
+                "Confidence": st.column_config.ProgressColumn(
+                    "Confidence",
+                    format="%d%%",
+                    min_value=0,
+                    max_value=100,
+                ),
+            },
+        )
 
-            sel_rows = (
-                grid_event.get("selection", {}).get("rows", [])
-                if isinstance(grid_event, dict)
-                else getattr(getattr(grid_event, "selection", None), "rows", [])
-            )
+        sel_rows = (
+            grid_event.get("selection", {}).get("rows", [])
+            if isinstance(grid_event, dict)
+            else getattr(getattr(grid_event, "selection", None), "rows", [])
+        )
+        grid_sig = (gen_key, cross_cell, st.session_state["triage_preset"], tuple(sel_rows))
+        if grid_sig != st.session_state.get("last_grid_sel"):
+            st.session_state["last_grid_sel"] = grid_sig
             if sel_rows:
                 row_idx = sel_rows[0]
                 if 0 <= row_idx < len(grid_df):
                     picked_cell = str(grid_df.iloc[row_idx]["EUtranCellFDD"])
-                    if picked_cell != st.session_state["inspected_cell"] or not st.session_state["drawer_open"]:
-                        st.session_state["inspected_cell"] = picked_cell
-                        st.session_state["drawer_open"] = True
-                        st.rerun()
+                    st.session_state["inspected_cell"] = picked_cell
+                    st.session_state["drawer_open"] = True
+                    st.rerun()
 
     # ------------------------------------------------------------------
-    # SLIDE-OVER DIAGNOSTIC EVIDENCE & AMOS TERMINAL INSPECTOR
+    # OFF-CANVAS FIXED SLIDE-OVER DIAGNOSTIC & AMOS TERMINAL DRAWER
     # ------------------------------------------------------------------
-    if col_drawer is not None:
-        with col_drawer:
+    if st.session_state["drawer_open"]:
+        with st.container(key="slide_over_drawer"):
             active_cell_name = st.session_state["inspected_cell"]
             cell_matches = full_df[full_df["EUtranCellFDD"] == active_cell_name]
             cell_row = cell_matches.iloc[0] if not cell_matches.empty else full_df.iloc[0]
+
+            top_d1, top_d2 = st.columns([8.2, 3.8], gap="small")
+            with top_d1:
+                render_html(
+                    """
+                    <div style="padding-top:5px;font-family:'JetBrains Mono',monospace;font-size:0.72rem;letter-spacing:0.08em;color:#38BDF8;font-weight:700;">
+                      ⚡ OFF-CANVAS CELL INSPECTOR &bull; RCA EVIDENCE
+                    </div>
+                    """
+                )
+            with top_d2:
+                if st.button("✕ Close Drawer", key="btn_close_slide_over", width="stretch"):
+                    st.session_state["drawer_open"] = False
+                    st.rerun()
 
             st_val = str(cell_row["Status"])
             conf_val = int(cell_row["Confidence_Score"])
@@ -1509,17 +1571,15 @@ def main() -> None:
             )
 
             amos_text = str(cell_row["AMOS_Script"])
+            amos_lines_html = format_amos_terminal_html(amos_text)
 
-            st.markdown(
+            render_html(
                 f"""
                 <div class="inspector-drawer drawer-{html.escape(st_val)}">
                   <div class="drawer-top">
                     <div>
-                      <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.08em;color:#38BDF8;font-weight:700;">
-                        SLIDE-OVER CELL INSPECTOR &bull; RCA EVIDENCE
-                      </div>
                       <div class="drawer-cell-id">{html.escape(str(cell_row['EUtranCellFDD']))}</div>
-                      <div class="drawer-enb-id">eNodeB: {html.escape(str(cell_row['eNodeB_Name']))} &bull; Group: {html.escape(str(cell_row['RCA_Category']))}</div>
+                      <div class="drawer-enb-id">eNodeB: {html.escape(str(cell_row['eNodeB_Name']))} &bull; {html.escape(str(cell_row['RCA_Category']))}</div>
                     </div>
                     <div style="text-align:right;">
                       {status_badge_html(st_val)}
@@ -1528,7 +1588,6 @@ def main() -> None:
                       </div>
                     </div>
                   </div>
-
                   <div class="mini-kpi-grid">
                     <div class="mini-kpi">
                       <div class="mk-lbl">CSSR</div>
@@ -1551,13 +1610,11 @@ def main() -> None:
                       <div class="mk-val" style="color:{'#FF4D4F' if pd.notna(cell_row['UL_Intf_dBm']) and cell_row['UL_Intf_dBm']>-110 else '#38BDF8'};">{intf_str}</div>
                     </div>
                   </div>
-
                   <div class="rca-callout">
                     <div style="color:#F8FAFC;font-weight:600;">🎯 {html.escape(str(cell_row['Primary_Root_Cause']))}</div>
                     <div style="color:#94A3B8;margin-top:4px;">💡 <strong>Remediation:</strong> {html.escape(str(cell_row['Recommendation']))}</div>
                     {secondary_html}
                   </div>
-
                   <div style="font-size:0.70rem;font-weight:700;letter-spacing:0.06em;color:#94A3B8;margin-bottom:5px;">
                     DIAGNOSTIC PM COUNTER EVIDENCE
                   </div>
@@ -1567,7 +1624,6 @@ def main() -> None:
                     </thead>
                     <tbody>{ev_rows_html}</tbody>
                   </table>
-
                   <div class="amos-terminal-wrap">
                     <div class="amos-term-bar">
                       <div class="amos-dots">
@@ -1578,11 +1634,10 @@ def main() -> None:
                       </div>
                       <span>AMOS / MOM CLI</span>
                     </div>
-                    <pre class="amos-pre">{html.escape(amos_text)}</pre>
+                    <div class="amos-code-box">{amos_lines_html}</div>
                   </div>
                 </div>
-                """,
-                unsafe_allow_html=True,
+                """
             )
 
             render_copy_button(
