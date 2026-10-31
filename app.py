@@ -41,6 +41,7 @@ DEFAULT_DATASET_PATH = Path(__file__).resolve().parent / "Data" / "Counters.xlsx
 TRIAGE_PRESETS = [
     "All Degraded",
     "Drop Call Spike (DCR > 1%)",
+    "Handover / RACH Issue (HOSR < 95%)",
     "Accessibility Failure (CSSR < 97%)",
     "IRAT Ping-Pong Loop (> 5%)",
     "Radio Quality / CQI Degraded",
@@ -363,7 +364,7 @@ def inject_cockpit_css() -> None:
         }
         .mini-kpi-grid {
             display: grid;
-            grid-template-columns: repeat(5, 1fr);
+            grid-template-columns: repeat(3, 1fr);
             gap: 6px;
             margin-bottom: 10px;
         }
@@ -534,11 +535,19 @@ def load_default_dump(path_str: str, mtime: float) -> AnalysisResult:
     return analyze_counter_dump(p, filename=p.name)
 
 
+def _render_iframe(markup: str, height: int) -> None:
+    """Embed HTML/JS widget using st.iframe (Streamlit >= 1.56) or components.html fallback."""
+    if hasattr(st, "iframe"):
+        st.iframe(markup, height=max(1, height))
+    else:
+        components.html(markup, height=height)
+
+
 def render_copy_button(text_to_copy: str, label: str, key_id: str, full_width: bool = True) -> None:
     """Render a tactile dark-OLED One-Click Copy button backed by browser Clipboard API."""
     payload = json.dumps(text_to_copy)
     width_css = "100%" if full_width else "auto"
-    components.html(
+    _render_iframe(
         f"""
         <div style="margin:0;padding:0;">
           <button id="btn_{key_id}" onclick="copyCmd_{key_id}()" style="
@@ -599,12 +608,12 @@ def render_copy_button(text_to_copy: str, label: str, key_id: str, full_width: b
 def trigger_pdf_autodownload(pdf_bytes: bytes, download_name: str) -> None:
     """Trigger immediate browser download of generated PDF bytes."""
     b64 = base64.b64encode(pdf_bytes).decode("ascii")
-    components.html(
+    _render_iframe(
         f"""
         <a id="auto_pdf_dl" href="data:application/pdf;base64,{b64}" download="{html.escape(download_name)}"></a>
         <script>document.getElementById('auto_pdf_dl').click();</script>
         """,
-        height=0,
+        height=1,
     )
 
 
@@ -642,19 +651,32 @@ def build_rop_trend_chart(ts_df: pd.DataFrame, scope_label: str) -> go.Figure:
         secondary_y=False,
     )
 
+    dcr_ovr = ts_df["DCR_Overall"] if "DCR_Overall" in ts_df.columns else ts_df["DCR"]
     fig.add_trace(
         go.Bar(
             x=ts_df["ROP_Time"],
-            y=ts_df["DCR"],
-            name="eNB DCR (%)",
+            y=dcr_ovr,
+            name="Overall DCR (%)",
             marker=dict(
-                color=np.where(ts_df["DCR"] > 2.5, "rgba(255,77,79,0.58)", np.where(ts_df["DCR"] > 1.0, "rgba(250,173,20,0.52)", "rgba(82,196,26,0.40)")),
+                color=np.where(dcr_ovr > 2.5, "rgba(255,77,79,0.58)", np.where(dcr_ovr > 1.0, "rgba(250,173,20,0.52)", "rgba(82,196,26,0.40)")),
                 line=dict(width=0),
             ),
-            hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>DCR: <b>%{y:.2f}%</b><extra></extra>",
+            hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Overall DCR: <b>%{y:.2f}%</b><extra></extra>",
         ),
         secondary_y=True,
     )
+    if "DCR_eNB" in ts_df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=ts_df["ROP_Time"],
+                y=ts_df["DCR_eNB"],
+                name="eNB DCR (%)",
+                mode="lines",
+                line=dict(color="#FAAD14", width=1.6, dash="dot"),
+                hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>eNB DCR: <b>%{y:.2f}%</b><extra></extra>",
+            ),
+            secondary_y=True,
+        )
 
     # Baseline Reference Lines
     fig.add_hline(
@@ -809,12 +831,16 @@ def build_pareto_worst_chart(
 ) -> go.Figure:
     """Horizontal Pareto Bar Chart of Top 10 Worst Cells supporting click Cross-Filtering."""
     metric_cfg = {
-        "DCR (%)": ("DCR", "DCR_Denom", 30, "%", True),
-        "Drops / 10k Session Hrs": ("DCR_Norm", "pmSessionTimeUe", 3600, "", True),
+        "Overall DCR (%)": ("DCR_Overall", "DCR_Denom", 30, "%", True),
+        "eNB DCR (%)": ("DCR_eNB", "DCR_Denom", 30, "%", True),
+        "Drops / Session Hr": ("DCR_Norm", "pmSessionTimeUe", 3600, "/hr", True),
+        "Lowest HOSR (%)": ("HOSR", "HO_Denom", 20, "%", False),
         "Low CQI (<7) Ratio (%)": ("Low_CQI_Ratio", "CQI_Samples", 100, "%", True),
         "RACH OOC Ratio (%)": ("RACH_OOC_Ratio", "pmRaAttCbra", 100, "%", True),
         "IRAT Ping-Pong (%)": ("IRAT_PingPong_Rate", "IRAT_Denom", 1, "%", True),
         "Lowest CSSR (%)": ("CSSR", "CSSR_Denom", 30, "%", False),
+        "VoLTE DCR (%)": ("VoLTE_DCR", "VoLTE_DCR_Denom", 10, "%", True),
+        "Lowest VoLTE CSSR (%)": ("VoLTE_CSSR", "VoLTE_CSSR_Denom", 10, "%", False),
     }
     col, denom_col, min_d, unit, desc = metric_cfg[rank_metric]
 
@@ -900,7 +926,7 @@ def init_session_state() -> None:
         "drawer_open": False,
         "last_grid_sel": None,
         "last_pareto_sel": None,
-        "pareto_metric": "DCR (%)",
+        "pareto_metric": "Overall DCR (%)",
         "pdf_cache_bytes": None,
         "pdf_cache_name": "",
         "pdf_cache_engine": "",
@@ -929,7 +955,15 @@ def apply_filters(cell_df: pd.DataFrame) -> pd.DataFrame:
     if preset == "All Degraded":
         df = df[df["Status"].isin(["CRITICAL", "DEGRADED"])]
     elif preset == "Drop Call Spike (DCR > 1%)":
-        df = df[(df["DCR_Denom"] >= 30) & (df["DCR"] > 1.0)]
+        df = df[
+            (df["DCR_Denom"] >= 30)
+            & ((df["DCR_Overall"] > 1.0) | ((df["pmSessionTimeUe"] >= 3600) & (df["DCR_Norm"] > 10.0)))
+        ]
+    elif preset == "Handover / RACH Issue (HOSR < 95%)":
+        df = df[
+            ((df["HO_Denom"] >= 20) & (df["HOSR"] < 95.0))
+            | ((df["CSSR_Denom"] >= 30) & (df["RACH_OOC_Ratio"] > 5.0))
+        ]
     elif preset == "Accessibility Failure (CSSR < 97%)":
         df = df[(df["CSSR_Denom"] >= 30) & (df["CSSR"] < 97.0)]
     elif preset == "IRAT Ping-Pong Loop (> 5%)":
@@ -976,7 +1010,7 @@ def main() -> None:
               <div style="width:34px;height:34px;border-radius:8px;background:#151D2E;border:1px solid #38BDF8;display:flex;align-items:center;justify-content:center;font-weight:700;color:#38BDF8;font-family:'JetBrains Mono',monospace;">E///</div>
               <div>
                 <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:0.98rem;color:#F8FAFC;">RAN RCA COCKPIT</div>
-                <div style="font-size:0.70rem;color:#94A3B8;font-family:'JetBrains Mono',monospace;">ENM / AMOS Telemetry v4.0</div>
+                <div style="font-size:0.70rem;color:#94A3B8;font-family:'JetBrains Mono',monospace;">ENM / AMOS Telemetry v6.0</div>
               </div>
             </div>
             """
@@ -1160,10 +1194,15 @@ def main() -> None:
     cssr_delta = avg_cssr - 98.5
 
     valid_dcr_cells = full_df[full_df["DCR_Denom"] >= 30]
-    avg_dcr = (
-        float(valid_dcr_cells["DCR"].mean())
+    avg_dcr_ovr = (
+        float(valid_dcr_cells["DCR_Overall"].mean())
         if not valid_dcr_cells.empty
-        else float(full_df["DCR"].mean())
+        else float(full_df["DCR_Overall"].mean())
+    )
+    avg_dcr_enb = (
+        float(valid_dcr_cells["DCR_eNB"].mean())
+        if not valid_dcr_cells.empty
+        else float(full_df["DCR_eNB"].mean())
     )
     avg_dcr_norm = float(full_df["DCR_Norm"].mean())
 
@@ -1229,8 +1268,8 @@ def main() -> None:
         )
 
     with c4:
-        dcr_breach = avg_dcr > 1.0
-        dcr_card_cls = "card-crit" if avg_dcr > 2.5 else ("card-deg" if dcr_breach else "card-norm")
+        dcr_breach = avg_dcr_ovr > 1.0
+        dcr_card_cls = "card-crit" if avg_dcr_ovr > 2.5 else ("card-deg" if dcr_breach else "card-norm")
         dcr_badge = (
             '<span class="status-badge badge-critical">⚠ ALERT &gt; 1.0%</span>'
             if dcr_breach
@@ -1239,14 +1278,14 @@ def main() -> None:
         render_html(
             f"""
             <div class="kpi-card {dcr_card_cls}">
-              <div class="kpi-label">System Retainability (Avg DCR)</div>
+              <div class="kpi-label">System Retainability (Overall DCR)</div>
               <div class="kpi-value-row">
-                <div class="kpi-value" style="color:{'#FF4D4F' if avg_dcr > 2.5 else ('#FAAD14' if dcr_breach else '#52C41A')};">{avg_dcr:.2f}%</div>
+                <div class="kpi-value" style="color:{'#FF4D4F' if avg_dcr_ovr > 2.5 else ('#FAAD14' if dcr_breach else '#52C41A')};">{avg_dcr_ovr:.2f}%</div>
                 {dcr_badge}
               </div>
               <div class="kpi-foot">
-                <span>eNB Active Drop Rate</span>
-                <span class="mono-num">{avg_dcr_norm:.1f} / 10k hr</span>
+                <span class="mono-num">eNB DCR: {avg_dcr_enb:.2f}%</span>
+                <span class="mono-num">{avg_dcr_norm:.1f} drops/hr</span>
               </div>
             </div>
             """
@@ -1326,13 +1365,19 @@ def main() -> None:
         p_col1, p_col2 = st.columns([7.5, 4.5], gap="small")
         with p_col1:
             pareto_options = [
-                "DCR (%)",
-                "Drops / 10k Session Hrs",
+                "Overall DCR (%)",
+                "eNB DCR (%)",
+                "Drops / Session Hr",
+                "Lowest HOSR (%)",
                 "Low CQI (<7) Ratio (%)",
                 "RACH OOC Ratio (%)",
                 "Lowest CSSR (%)",
                 "IRAT Ping-Pong (%)",
             ]
+            if result.has_volte_counters:
+                pareto_options.extend(["VoLTE DCR (%)", "Lowest VoLTE CSSR (%)"])
+            if st.session_state["pareto_metric"] not in pareto_options:
+                st.session_state["pareto_metric"] = pareto_options[0]
             rank_by = st.selectbox(
                 "Rank Pareto By",
                 options=pareto_options,
@@ -1462,23 +1507,26 @@ def main() -> None:
             "NORMAL": "🟢 NORMAL",
             "LOW_SAMPLE": "⚪ LOW_SAMPLE",
         }
-        display_df = pd.DataFrame(
-            {
-                "Action": ["[Diagnose] ▸"] * len(grid_df),
-                "Status": grid_df["Status"].map(status_icons).fillna(grid_df["Status"]),
-                "eNodeB_Name": grid_df["eNodeB_Name"],
-                "EUtranCellFDD": grid_df["EUtranCellFDD"],
-                "CSSR (%)": grid_df["CSSR"].round(2),
-                "DCR (%)": grid_df["DCR"].round(2),
-                "HOSR (%)": grid_df["HOSR"].round(2),
-                "Avg CQI": grid_df["Avg_CQI"].round(2),
-                "UL Intf (dBm)": grid_df["UL_Intf_dBm"].round(1),
-                "IRAT PP (%)": grid_df["IRAT_PingPong_Rate"].round(2),
-                "RCA Type": grid_df["RCA_Category"],
-                "Root Cause Diagnosis": grid_df["Primary_Root_Cause"],
-                "Confidence": grid_df["Confidence_Score"],
-            }
-        )
+        grid_cols_data = {
+            "Action": ["[Diagnose] ▸"] * len(grid_df),
+            "Status": grid_df["Status"].map(status_icons).fillna(grid_df["Status"]),
+            "eNodeB_Name": grid_df["eNodeB_Name"],
+            "EUtranCellFDD": grid_df["EUtranCellFDD"],
+            "CSSR (%)": grid_df["CSSR"].round(2),
+            "Overall DCR (%)": grid_df["DCR_Overall"].round(2),
+            "eNB DCR (%)": grid_df["DCR_eNB"].round(2),
+            "HOSR (%)": grid_df["HOSR"].round(2),
+            "Avg CQI": grid_df["Avg_CQI"].round(2),
+            "UL Intf (dBm)": grid_df["UL_Intf_dBm"].round(1),
+            "IRAT PP (%)": grid_df["IRAT_PingPong_Rate"].round(2),
+        }
+        if result.has_volte_counters:
+            grid_cols_data["VoLTE CSSR (%)"] = grid_df["VoLTE_CSSR"].round(2)
+            grid_cols_data["VoLTE DCR (%)"] = grid_df["VoLTE_DCR"].round(2)
+        grid_cols_data["RCA Type"] = grid_df["RCA_Category"]
+        grid_cols_data["Root Cause Diagnosis"] = grid_df["Primary_Root_Cause"]
+        grid_cols_data["Confidence"] = grid_df["Confidence_Score"]
+        display_df = pd.DataFrame(grid_cols_data)
 
         grid_event = st.dataframe(
             display_df,
@@ -1494,11 +1542,14 @@ def main() -> None:
                 "eNodeB_Name": st.column_config.TextColumn("eNodeB_Name", width="medium"),
                 "EUtranCellFDD": st.column_config.TextColumn("EUtranCellFDD", width="medium"),
                 "CSSR (%)": st.column_config.NumberColumn("CSSR %", format="%.2f%%"),
-                "DCR (%)": st.column_config.NumberColumn("DCR %", format="%.2f%%"),
+                "Overall DCR (%)": st.column_config.NumberColumn("Overall DCR %", format="%.2f%%"),
+                "eNB DCR (%)": st.column_config.NumberColumn("eNB DCR %", format="%.2f%%"),
                 "HOSR (%)": st.column_config.NumberColumn("HOSR %", format="%.2f%%"),
                 "Avg CQI": st.column_config.NumberColumn("Avg CQI", format="%.2f"),
                 "UL Intf (dBm)": st.column_config.NumberColumn("UL Noise", format="%.1f dBm"),
                 "IRAT PP (%)": st.column_config.NumberColumn("IRAT PP", format="%.2f%%"),
+                "VoLTE CSSR (%)": st.column_config.NumberColumn("VoLTE CSSR", format="%.2f%%"),
+                "VoLTE DCR (%)": st.column_config.NumberColumn("VoLTE DCR", format="%.2f%%"),
                 "RCA Type": st.column_config.TextColumn("RCA Category", width="medium"),
                 "Root Cause Diagnosis": st.column_config.TextColumn("Primary Root Cause", width="large"),
                 "Confidence": st.column_config.ProgressColumn(
@@ -1594,12 +1645,16 @@ def main() -> None:
                       <div class="mk-val" style="color:{'#FF4D4F' if cell_row['CSSR']<97 else '#52C41A'};">{cell_row['CSSR']:.2f}%</div>
                     </div>
                     <div class="mini-kpi">
+                      <div class="mk-lbl">Overall DCR</div>
+                      <div class="mk-val" style="color:{'#FF4D4F' if cell_row['DCR_Overall']>2.5 else ('#FAAD14' if cell_row['DCR_Overall']>1.0 else '#52C41A')};">{cell_row['DCR_Overall']:.2f}%</div>
+                    </div>
+                    <div class="mini-kpi">
                       <div class="mk-lbl">eNB DCR</div>
-                      <div class="mk-val" style="color:{'#FF4D4F' if cell_row['DCR']>2.5 else ('#FAAD14' if cell_row['DCR']>1.0 else '#52C41A')};">{cell_row['DCR']:.2f}%</div>
+                      <div class="mk-val" style="color:{'#FF4D4F' if cell_row['DCR_eNB']>2.5 else ('#FAAD14' if cell_row['DCR_eNB']>1.0 else '#52C41A')};">{cell_row['DCR_eNB']:.2f}%</div>
                     </div>
                     <div class="mini-kpi">
                       <div class="mk-lbl">HOSR</div>
-                      <div class="mk-val" style="color:{'#FAAD14' if cell_row['HOSR']<95 else '#F8FAFC'};">{cell_row['HOSR']:.2f}%</div>
+                      <div class="mk-val" style="color:{'#FF4D4F' if cell_row['HOSR']<90 else ('#FAAD14' if cell_row['HOSR']<95 else '#F8FAFC')};">{cell_row['HOSR']:.2f}%</div>
                     </div>
                     <div class="mini-kpi">
                       <div class="mk-lbl">Avg CQI</div>
@@ -1607,7 +1662,7 @@ def main() -> None:
                     </div>
                     <div class="mini-kpi">
                       <div class="mk-lbl">UL Noise</div>
-                      <div class="mk-val" style="color:{'#FF4D4F' if pd.notna(cell_row['UL_Intf_dBm']) and cell_row['UL_Intf_dBm']>-110 else '#38BDF8'};">{intf_str}</div>
+                      <div class="mk-val" style="color:{'#FF4D4F' if pd.notna(cell_row['UL_Intf_dBm']) and cell_row['UL_Intf_dBm']>-110 else '#38BDF8'};">{intf_str} dBm</div>
                     </div>
                   </div>
                   <div class="rca-callout">

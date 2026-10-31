@@ -76,7 +76,16 @@ def build_html_report(
     cssr_delta = avg_cssr - 98.5
 
     valid_dcr_df = full_df[full_df["DCR_Denom"] >= 30]
-    avg_dcr = float(valid_dcr_df["DCR"].mean()) if not valid_dcr_df.empty else float(full_df["DCR"].mean())
+    avg_dcr_ovr = (
+        float(valid_dcr_df["DCR_Overall"].mean())
+        if not valid_dcr_df.empty
+        else float(full_df["DCR_Overall"].mean())
+    )
+    avg_dcr_enb = (
+        float(valid_dcr_df["DCR_eNB"].mean())
+        if not valid_dcr_df.empty
+        else float(full_df["DCR_eNB"].mean())
+    )
     avg_hosr = float(full_df["HOSR"].mean()) if not full_df.empty else 100.0
     avg_cqi = float(full_df["Avg_CQI"].dropna().mean()) if full_df["Avg_CQI"].notna().any() else 0.0
 
@@ -103,6 +112,13 @@ def build_html_report(
         cqi_txt = f"{r['Avg_CQI']:.2f}" if pd.notna(r.get("Avg_CQI")) else "N/A"
         intf_txt = f"{r['UL_Intf_dBm']:.1f}" if pd.notna(r.get("UL_Intf_dBm")) else "N/A"
         conf_txt = f"{int(r['Confidence_Score'])}%" if int(r.get("Confidence_Score", 0)) > 0 else "N/A"
+        dcr_o = float(r.get("DCR_Overall", r.get("DCR", 0.0)))
+        dcr_e = float(r.get("DCR_eNB", 0.0))
+        dcr_cls_cell = (
+            "txt-crit"
+            if dcr_o > 2.5 and r["DCR_Denom"] >= 30
+            else ("txt-deg" if dcr_o > 1.0 and r["DCR_Denom"] >= 30 else "")
+        )
         matrix_rows.append(
             f"""
             <tr>
@@ -110,7 +126,8 @@ def build_html_report(
               <td class="mono">{html.escape(str(r['eNodeB_Name']))}</td>
               <td class="mono fw-600">{html.escape(str(r['EUtranCellFDD']))}</td>
               <td class="mono num">{r['CSSR']:.2f}%</td>
-              <td class="mono num {'txt-crit' if r['DCR'] > 2.5 and r['DCR_Denom'] >= 30 else ('txt-deg' if r['DCR'] > 1.0 and r['DCR_Denom'] >= 30 else '')}">{r['DCR']:.2f}%</td>
+              <td class="mono num {dcr_cls_cell}">{dcr_o:.2f}%</td>
+              <td class="mono num">{dcr_e:.2f}%</td>
               <td class="mono num">{r['HOSR']:.2f}%</td>
               <td class="mono num">{cqi_txt}</td>
               <td class="mono num">{intf_txt}</td>
@@ -173,7 +190,7 @@ def build_html_report(
 
     doc_id = f"RAN-RCA-{pd.Timestamp.now().strftime('%Y%m%d-%H%M')}"
     cssr_cls = "txt-ok" if cssr_delta >= 0 else "txt-deg"
-    dcr_cls = "txt-crit" if avg_dcr > 2.5 else ("txt-deg" if avg_dcr > 1.0 else "txt-ok")
+    dcr_cls = "txt-crit" if avg_dcr_ovr > 2.5 else ("txt-deg" if avg_dcr_ovr > 1.0 else "txt-ok")
 
     return f"""<!DOCTYPE html>
 <html lang="vi">
@@ -515,10 +532,10 @@ def build_html_report(
       <div class="kpi-val mono">{avg_cssr:.2f}%</div>
       <div class="kpi-sub">Baseline 98.50% (<span class="{cssr_cls}">{cssr_delta:+.2f}%</span>) &bull; HOSR: {avg_hosr:.2f}%</div>
     </div>
-    <div class="kpi-card {'crit-border' if avg_dcr > 1.0 else 'ok-border'}">
-      <div class="kpi-label">System Retainability (Avg DCR)</div>
-      <div class="kpi-val mono" style="color:{'#FF4D4F' if avg_dcr > 1.0 else '#52C41A'};">{avg_dcr:.2f}%</div>
-      <div class="kpi-sub">Threshold &le; 1.0% &bull; Avg CQI: {avg_cqi:.2f}</div>
+    <div class="kpi-card {'crit-border' if avg_dcr_ovr > 1.0 else 'ok-border'}">
+      <div class="kpi-label">System Retainability (Overall DCR)</div>
+      <div class="kpi-val mono" style="color:{'#FF4D4F' if avg_dcr_ovr > 1.0 else '#52C41A'};">{avg_dcr_ovr:.2f}%</div>
+      <div class="kpi-sub">eNB DCR: {avg_dcr_enb:.2f}% &bull; Avg CQI: {avg_cqi:.2f}</div>
     </div>
   </section>
 
@@ -531,17 +548,18 @@ def build_html_report(
   <table class="master-table">
     <thead>
       <tr>
-        <th style="width:76px;">Status</th>
-        <th style="width:110px;">eNodeB_Name</th>
-        <th style="width:125px;">EUtranCellFDD</th>
-        <th class="num" style="width:56px;">CSSR</th>
-        <th class="num" style="width:56px;">DCR</th>
-        <th class="num" style="width:56px;">HOSR</th>
-        <th class="num" style="width:48px;">CQI</th>
-        <th class="num" style="width:62px;">UL dBm</th>
-        <th style="width:135px;">RCA Category</th>
+        <th style="width:72px;">Status</th>
+        <th style="width:105px;">eNodeB_Name</th>
+        <th style="width:120px;">EUtranCellFDD</th>
+        <th class="num" style="width:52px;">CSSR</th>
+        <th class="num" style="width:56px;">Ovr DCR</th>
+        <th class="num" style="width:56px;">eNB DCR</th>
+        <th class="num" style="width:52px;">HOSR</th>
+        <th class="num" style="width:44px;">CQI</th>
+        <th class="num" style="width:58px;">UL dBm</th>
+        <th style="width:128px;">RCA Category</th>
         <th>Primary Root Cause Diagnosis</th>
-        <th class="num" style="width:48px;">Conf.</th>
+        <th class="num" style="width:45px;">Conf.</th>
       </tr>
     </thead>
     <tbody>
@@ -554,7 +572,7 @@ def build_html_report(
   {"".join(deep_cards)}
 
   <div class="footer-note mono">
-    Antigravity Principal RAN Performance &amp; Optimization Suite &bull; 3GPP / Ericsson MOM Deterministic RCA Engine v4.0
+    Antigravity Principal RAN Performance &amp; Optimization Suite &bull; 3GPP / Ericsson MOM Deterministic RCA Engine v6.0
   </div>
 
 </body>
@@ -719,28 +737,31 @@ def _render_via_reportlab(
 
     tbl_data = [
         [
-            "Status", "eNodeB_Name", "EUtranCellFDD", "CSSR", "DCR",
-            "HOSR", "CQI", "UL dBm", "RCA Category", "Primary Root Cause", "Conf",
+            "Status", "eNodeB_Name", "EUtranCellFDD", "CSSR", "Ovr DCR",
+            "eNB DCR", "HOSR", "CQI", "UL dBm", "RCA Category", "Primary Root Cause", "Conf",
         ]
     ]
     row_styles = [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0B0F19")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#F8FAFC")),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.2),
         ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]
 
     for idx, (_, r) in enumerate(report_df.head(40).iterrows(), start=1):
         st_val = str(r["Status"])
+        dcr_o = float(r.get("DCR_Overall", r.get("DCR", 0.0)))
+        dcr_e = float(r.get("DCR_eNB", 0.0))
         tbl_data.append(
             [
                 st_val,
                 str(r["eNodeB_Name"]),
                 str(r["EUtranCellFDD"]),
                 f"{r['CSSR']:.2f}%",
-                f"{r['DCR']:.2f}%",
+                f"{dcr_o:.2f}%",
+                f"{dcr_e:.2f}%",
                 f"{r['HOSR']:.2f}%",
                 f"{r['Avg_CQI']:.1f}" if pd.notna(r.get("Avg_CQI")) else "N/A",
                 f"{r['UL_Intf_dBm']:.1f}" if pd.notna(r.get("UL_Intf_dBm")) else "N/A",
@@ -759,7 +780,7 @@ def _render_via_reportlab(
             row_styles.append(("BACKGROUND", (0, idx), (0, idx), colors.HexColor("#DCFCE7")))
             row_styles.append(("TEXTCOLOR", (0, idx), (0, idx), colors.HexColor("#15803D")))
 
-    col_w = [18 * mm, 28 * mm, 32 * mm, 14 * mm, 14 * mm, 14 * mm, 12 * mm, 15 * mm, 35 * mm, 78 * mm, 13 * mm]
+    col_w = [17 * mm, 26 * mm, 30 * mm, 13 * mm, 13 * mm, 13 * mm, 13 * mm, 11 * mm, 14 * mm, 33 * mm, 78 * mm, 12 * mm]
     m_tbl = Table(tbl_data, colWidths=col_w, repeatRows=1)
     m_tbl.setStyle(TableStyle(row_styles))
     story.append(m_tbl)
