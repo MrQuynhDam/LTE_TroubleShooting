@@ -150,7 +150,7 @@ def build_html_report(
             f"<tr><td class='mono'>{html.escape(str(item['Counter / Indicator']))}</td>"
             f"<td class='mono fw-600'>{html.escape(str(item['Value']))}</td>"
             f"<td>{html.escape(str(item['Meaning']))}</td></tr>"
-            for item in ev_list[:6]
+            for item in ev_list[:11]
         )
         amos_escaped = html.escape(str(r.get("AMOS_Script", "")))
         deep_cards.append(

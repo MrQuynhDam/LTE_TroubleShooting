@@ -1131,7 +1131,10 @@ def _diagnose_cell_row(
     irat_rel_rate = (irat_denom / rrc_succ) if rrc_succ > 0 else 0.0
     if valid_irat and (irat_pp > 5.0 or irat_rel_rate > 0.25):
         sev = 3 if irat_pp > 10.0 else 2
-        bad_cov_rep = float(row.get("pmBadCovEvalReport", 0.0))
+        bad_cov_rep = max(
+            float(row.get("pmBadCovEvalReport", 0.0)),
+            float(row.get("pmBadCovSearchEvalReport", 0.0)),
+        )
         csfb_rel = float(row.get("pmUeCtxtRelCsfbWcdma", 0.0))
         sc_wcdma = float(row.get("pmUeCtxtRelSCWcdma", 0.0))
         b2_t1 = float(row["b2Threshold1Rsdp"]) if pd.notna(row.get("b2Threshold1Rsdp")) else -108.0
@@ -1141,7 +1144,8 @@ def _diagnose_cell_row(
         hyst_b2 = float(row["hysteresisB2"]) if pd.notna(row.get("hysteresisB2")) else 30.0
 
         if rrc_succ > 0 and (bad_cov_rep / rrc_succ) > 0.40 and b2_t1 > -110.0:
-            cause_txt = "Aggressive Event A2 / B2 Threshold Triggering (4G Threshold Too High)"
+            a2_pct = bad_cov_rep / rrc_succ * 100.0
+            cause_txt = f"Aggressive Event A2 / B2 Threshold Triggering (A2 Search {a2_pct:.1f}%, IRAT {irat_pp:.1f}%)"
             rec_txt = "Lower a2Threshold0Rsdp (to -115 dBm) and b2Threshold1Rsdp (to -116 dBm) so UE stays on 4G longer."
         elif b2_t2 < -100.0 or b2_ecno < -14.0:
             cause_txt = "Loose 3G Target Quality Threshold (B2 Threshold 2 Too Low)"
@@ -1351,6 +1355,34 @@ def _diagnose_cell_row(
         },
     ]
 
+    if has_irat:
+        ir_sc = int(row.get("pmUeCtxtRelSCWcdma", 0))
+        ir_ho = int(
+            row.get("UtranCellRelation.pmHoExeSucc", 0)
+            if float(row.get("UtranCellRelation.pmHoExeSucc", 0.0)) > 0
+            else row.get("pmHoExeSucc", 0)
+        )
+        ir_a2 = int(max(float(row.get("pmBadCovEvalReport", 0.0)), float(row.get("pmBadCovSearchEvalReport", 0.0))))
+        ir_b2 = int(row.get("pmB2BestCellEvalReport", 0))
+        ir_csfb = int(row.get("pmUeCtxtRelCsfbWcdma", 0))
+        a2_ratio_ev = (ir_a2 / rrc_succ * 100.0) if rrc_succ > 0 else 0.0
+        evidence_items.append(
+            {
+                "Counter / Indicator": "3G/4G IRAT Redirect & HO",
+                "Value": f"SC:{ir_sc:,} + HO:{ir_ho:,} ({irat_pp:.2f}%)",
+                "Meaning": f"A2 Search: {ir_a2:,} ({a2_ratio_ev:.1f}%) | B2: {ir_b2:,} | CSFB: {ir_csfb:,}",
+            }
+        )
+
+    if has_volte:
+        evidence_items.append(
+            {
+                "Counter / Indicator": "VoLTE QCI=1 Bearer KPI",
+                "Value": f"CSSR {volte_cssr:.2f}% | DCR {volte_dcr:.2f}%",
+                "Meaning": f"QCI=1 Att: {int(volte_cssr_denom):,} | Rel: {int(volte_dcr_denom):,}",
+            }
+        )
+
     if not findings:
         if low_sample_notes or (not valid_cssr and not valid_dcr):
             excl_msg = (
@@ -1507,6 +1539,7 @@ def generate_amos_script(
             lines.extend([
                 "",
                 "# --- Scenario D: 3G/4G IRAT Ping-Pong Mitigation Protocol ---",
+                f"pget EUtranCellFDD={cell} pmUeCtxtRelSCWcdma|pmUeCtxtRelCsfbWcdma|pmBadCovSearchEvalReport|pmB2BestCellEvalReport",
                 f"get EUtranCellFDD={cell},UeMeasControl=1 a2Threshold0Rsdp",
                 f"get EUtranCellFDD={cell},UeMeasControl=1,ReportConfigB2=1 b2Threshold1Rsdp|b2Threshold2RsdpUtran|timeToTrigger|hysteresis",
                 f"get EUtranCellFDD={cell},UtranFreqRelation= cellReselectionPriority|threshXLow|qRxLevMin",

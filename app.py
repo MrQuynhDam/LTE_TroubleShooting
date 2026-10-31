@@ -837,7 +837,7 @@ def build_pareto_worst_chart(
         "Lowest HOSR (%)": ("HOSR", "HO_Denom", 20, "%", False),
         "Low CQI (<7) Ratio (%)": ("Low_CQI_Ratio", "CQI_Samples", 100, "%", True),
         "RACH OOC Ratio (%)": ("RACH_OOC_Ratio", "pmRaAttCbra", 100, "%", True),
-        "IRAT Ping-Pong (%)": ("IRAT_PingPong_Rate", "IRAT_Denom", 1, "%", True),
+        "IRAT Ping-Pong (%)": ("IRAT_PingPong_Rate", "IRAT_Denom", 10, "%", True),
         "Lowest CSSR (%)": ("CSSR", "CSSR_Denom", 30, "%", False),
         "VoLTE DCR (%)": ("VoLTE_DCR", "VoLTE_DCR_Denom", 10, "%", True),
         "Lowest VoLTE CSSR (%)": ("VoLTE_CSSR", "VoLTE_CSSR_Denom", 10, "%", False),
